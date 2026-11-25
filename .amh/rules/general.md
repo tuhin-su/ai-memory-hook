@@ -1,0 +1,2 @@
+- Keep changes small and focused.
+- Update .amh/docs when architecture changes.
