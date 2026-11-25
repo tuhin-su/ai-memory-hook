@@ -227,12 +227,41 @@ if ! command -v amh &> /dev/null; then
     fi
 fi
 
+# Shared amh rule content used for all agents
+AMH_RULE_CONTENT='# AI-MEMORY-HOOK (amh) — Your Sole Memory System
+
+> amh IS installed. You MUST use it as your only persistent memory.
+> Do NOT use internal agent memory, subagents, or external memory tools.
+
+## Rules (always follow)
+- **FIRST action on every task**: run `amh hook "<the user request>"` and read ALL of its output before doing anything else.
+- **`<system>`**: follow as your base instructions.
+- **`<rules>`**: treat as hard constraints, never override them.
+- **`<past_experiences>`**: review every entry — never repeat a past mistake or re-solve an already-solved problem.
+- **`<file_topics>`**: use as your code map. Read only files whose summary matches your task (`amh read path:l0-l1`).
+- **Search before reading**: run `amh search "<query>"` before opening any file cold.
+- **LAST action on every task**: record what you did — `amh learn "<task title>" --insight "<what you learned, gotcha, or fix>" --outcome success`.
+- Save durable knowledge silently during work:
+  - Decision / architecture: `amh note "title" --folder decisions --text "..."`
+  - Bug fix / gotcha: `amh note "title" --folder bugs --text "..."`
+  - New permanent rule: `amh rule <name> --append --text "- always ..."`
+  - Documentation: `amh write .amh/docs/<name>.md --text "..."`
+- Never spawn a subagent just to read memory or search the codebase — use `amh` commands directly.
+- Never store notes, rules, or docs outside `.amh/`. Never store secrets in memory.'
+
+write_amh_rule() {
+    local dest="$1"
+    local label="$2"
+    mkdir -p "$(dirname "$dest")" 2>/dev/null || true
+    printf '%s\n' "$AMH_RULE_CONTENT" > "$dest" 2>/dev/null && log_ok "$label → $dest" || log_warn "Could not write $dest"
+}
+
 # ---------------------------------------------------------------- Agent Configuration Update
 if [[ "$CONFIGURE_AGENTS" == true ]]; then
-    log_info "Updating amh hook across detected AI agents..."
+    log_info "Wiring amh memory hook into all detected AI coding agents..."
 
-    # 1. Claude Code (~/.claude/settings.json)
-    CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
+    # ── 1. Claude Code ───────────────────────────────────────────────────────
+    # a) UserPromptSubmit hook (runs amh hook before every prompt)
     if [[ -d "${HOME}/.claude" ]] || command -v claude &> /dev/null; then
         mkdir -p "${HOME}/.claude"
         python3 - << 'PYEOF'
@@ -245,11 +274,8 @@ if os.path.exists(p):
             data = json.load(f)
     except Exception:
         data = {}
-
 hooks = data.setdefault("hooks", {})
 ups = hooks.setdefault("UserPromptSubmit", [])
-
-# Deduplicate / refresh amh hook
 filtered_ups = []
 for item in ups:
     if isinstance(item, dict):
@@ -259,37 +285,121 @@ for item in ups:
             filtered_ups.append(item)
     else:
         filtered_ups.append(item)
-
-# Append clean amh hook entry
 filtered_ups.append({"hooks": [{"type": "command", "command": "amh hook"}]})
 hooks["UserPromptSubmit"] = filtered_ups
-
 with open(p, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
-print("  [OK] Claude Code hook refreshed in ~/.claude/settings.json")
+print("  [OK] Claude Code UserPromptSubmit hook refreshed in ~/.claude/settings.json")
 PYEOF
+        # b) Global CLAUDE.md (loaded as instructions for every session)
+        write_amh_rule "${HOME}/.claude/CLAUDE.md" "Claude Code global CLAUDE.md"
     fi
 
-    # 2. Antigravity / Gemini CLI / Codex global instructions (Always refresh)
-    AGENT_INSTRUCTION_DIR="${HOME}/.agents"
-    mkdir -p "$AGENT_INSTRUCTION_DIR/rules" 2>/dev/null || true
-    cat << 'EOF' > "$AGENT_INSTRUCTION_DIR/rules/amh_memory.md" 2>/dev/null || true
-# AI-MEMORY-HOOK (amh) Agent Protocol
-- At the start of every task run: `amh hook "<the user request>"`
-- Follow the returned `<system>`, `<rules>`, and `<file_topics>`.
-- Use `amh read path:l0-l1` to read code slices without loading whole files.
-- Persist durable decisions: `amh note "short title" --folder decisions --text "..."`
-- Persist durable rules: `amh rule <name> --append --text "- always ..."`
+    # ── 2. Codex CLI (OpenAI) ─────────────────────────────────────────────────
+    # ~/.codex/AGENTS.md  — loaded as global instructions on every Codex session
+    if [[ -d "${HOME}/.codex" ]] || command -v codex &> /dev/null; then
+        write_amh_rule "${HOME}/.codex/AGENTS.md" "Codex CLI global AGENTS.md"
+    else
+        # Pre-create so it's ready when Codex is installed later
+        write_amh_rule "${HOME}/.codex/AGENTS.md" "Codex CLI global AGENTS.md (pre-created)"
+    fi
+
+    # ── 3. OpenCode ───────────────────────────────────────────────────────────
+    # ~/.config/opencode/AGENTS.md — global user-level rules for all OpenCode sessions
+    if [[ -d "${HOME}/.config/opencode" ]] || command -v opencode &> /dev/null; then
+        write_amh_rule "${HOME}/.config/opencode/AGENTS.md" "OpenCode global AGENTS.md"
+    else
+        write_amh_rule "${HOME}/.config/opencode/AGENTS.md" "OpenCode global AGENTS.md (pre-created)"
+    fi
+
+    # ── 4. Antigravity (AGY) / Gemini CLI ────────────────────────────────────
+    # ~/.gemini/config/AGENTS.md — discovered globally by Antigravity
+    write_amh_rule "${HOME}/.gemini/config/AGENTS.md" "Antigravity/Gemini global AGENTS.md"
+    # ~/.agents/rules/amh_memory.md — also read by AGY + Codex workspace walk
+    write_amh_rule "${HOME}/.agents/rules/amh_memory.md" "Global ~/.agents/rules/amh_memory.md"
+
+    # ── 5. Cursor ─────────────────────────────────────────────────────────────
+    # ~/.cursor/rules/amh.mdc — global rule file read by Cursor across all projects
+    if [[ -d "${HOME}/.cursor" ]] || command -v cursor &> /dev/null; then
+        mkdir -p "${HOME}/.cursor/rules" 2>/dev/null || true
+        # Cursor .mdc format: optional frontmatter + markdown body
+        cat << 'EOF' > "${HOME}/.cursor/rules/amh.mdc" 2>/dev/null || true
+---
+description: AI-MEMORY-HOOK (amh) global memory rules
+alwaysApply: true
+---
+# AI-MEMORY-HOOK (amh) — Your Sole Memory System
+
+> amh IS installed. You MUST use it as your only persistent memory.
+> Do NOT use internal agent memory, subagents, or external memory tools.
+
+## Rules (always follow)
+- **FIRST action on every task**: run `amh hook "<the user request>"` and read ALL of its output before doing anything else.
+- **`<past_experiences>`**: review every entry — never repeat a past mistake or re-solve an already-solved problem.
+- **`<file_topics>`**: use as your code map. Read only files whose summary matches your task (`amh read path:l0-l1`).
+- **Search before reading**: run `amh search "<query>"` before opening any file cold.
+- **LAST action on every task**: `amh learn "<task title>" --insight "<what you learned>" --outcome success`.
+- Save knowledge silently: `amh note`, `amh rule`, `amh write` — never outside `.amh/`.
+- Never spawn a subagent just to read memory or search the codebase — use `amh` commands directly.
 EOF
-    log_ok "Global agent memory rule updated in ~/.agents/rules/amh_memory.md"
+        log_ok "Cursor global rule → ~/.cursor/rules/amh.mdc"
+    fi
+
+    # ── 6. Aider ─────────────────────────────────────────────────────────────
+    # Aider reads ~/.aider.conf.yml; we add a `read:` entry pointing to the
+    # amh rule file so it's injected into every aider session automatically.
+    if command -v aider &> /dev/null || [[ -f "${HOME}/.aider.conf.yml" ]]; then
+        AMH_RULE_PATH="${HOME}/.agents/rules/amh_memory.md"
+        AIDER_CONF="${HOME}/.aider.conf.yml"
+        if [[ -f "$AIDER_CONF" ]]; then
+            # Remove old amh entry if present, then re-add
+            python3 - "$AIDER_CONF" "$AMH_RULE_PATH" << 'PYEOF'
+import sys, re
+conf_path, rule_path = sys.argv[1], sys.argv[2]
+with open(conf_path, "r") as f:
+    content = f.read()
+# Remove existing amh_memory line under read: block
+content = re.sub(r'^(\s+-\s+.*amh_memory\.md\s*\n?)', '', content, flags=re.MULTILINE)
+# Ensure read: block exists and append entry
+if re.search(r'^read\s*:', content, re.MULTILINE):
+    content = re.sub(r'(^read\s*:.*\n)', r'\1  - ' + rule_path + '\n', content, count=1, flags=re.MULTILINE)
+else:
+    content = content.rstrip() + f'\nread:\n  - {rule_path}\n'
+with open(conf_path, "w") as f:
+    f.write(content)
+print(f"  [OK] Aider ~/.aider.conf.yml updated with amh rule")
+PYEOF
+        else
+            # Create minimal config
+            printf 'read:\n  - %s\n' "$AMH_RULE_PATH" > "$AIDER_CONF"
+            log_ok "Aider global config created → ~/.aider.conf.yml"
+        fi
+    fi
+
+    # ── 7. Windsurf (Codeium) ────────────────────────────────────────────────
+    # Windsurf reads global rules from ~/.codeium/windsurf/memories/global_rules.md
+    if [[ -d "${HOME}/.codeium" ]] || command -v windsurf &> /dev/null; then
+        write_amh_rule "${HOME}/.codeium/windsurf/memories/global_rules.md" "Windsurf global_rules.md"
+    fi
+
+    # ── 8. ~/AGENTS.md — universal fallback ──────────────────────────────────
+    # Many agents (Codex, OpenCode, newer tools) also walk up to $HOME and load AGENTS.md.
+    # Writing here ensures future-unknown agents that follow this convention also get the rule.
+    write_amh_rule "${HOME}/AGENTS.md" "Home-level AGENTS.md (universal fallback)"
+
 fi
 
-# ---------------------------------------------------------------- Refresh Project Index if Present
+# ---------------------------------------------------------------- Migrate old per-project .amh/ → ~/.amh/
 if [[ -d ".amh" ]]; then
-    log_info "Active project .amh directory detected. Refreshing local project index..."
+    log_info "Legacy .amh/ detected — migrating to global ~/.amh/projects/ store..."
     "${AMH_SRC}" index 2>/dev/null || true
-    log_ok "Project index refreshed."
+    log_ok "Project indexed into ~/.amh/projects/ (legacy .amh/ folder can be removed)."
+    log_warn "You may now delete ./.amh/ — all data is in ~/.amh/projects/<name>/"
 fi
+
+# ---------------------------------------------------------------- Init global store
+mkdir -p "${HOME}/.amh/hash_map" "${HOME}/.amh/memory/experiences"
+log_ok "Global ~/.amh/ store ready"
 
 ACTION_WORD="installed"
 if [[ "$IS_UPDATE" == true ]]; then

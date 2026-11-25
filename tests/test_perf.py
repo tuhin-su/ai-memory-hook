@@ -103,10 +103,10 @@ def benchmark_indexing(repo_dir: Path):
     t1 = time.perf_counter()
     assert res.returncode == 0, f"index failed: {res.stderr}"
 
-    c = sqlite3.connect(repo_dir / ".amh" / "index.db")
+    c = sqlite3.connect(amh.AMH_PROJECTS / repo_dir.name / "vector.db")
     file_count = c.execute("SELECT COUNT(*) FROM files").fetchone()[0]
     topic_count = c.execute("SELECT COUNT(*) FROM topics").fetchone()[0]
-    db_size_kb = (repo_dir / ".amh" / "index.db").stat().st_size / 1024
+    db_size_kb = (amh.AMH_PROJECTS / repo_dir.name / "vector.db").stat().st_size / 1024
 
     elapsed = t1 - t0
     files_per_sec = file_count / elapsed
@@ -121,8 +121,8 @@ def benchmark_indexing(repo_dir: Path):
 def benchmark_inprocess_search(repo_dir: Path, num_queries=1000):
     """Measures pure SQLite FTS5 BM25 search engine latency without subprocess overhead."""
     print(f"\n[3/6] Benchmarking in-process FTS5 BM25 query latency ({num_queries} queries)...")
-    amh.set_root(repo_dir)
-    c = amh.db()
+    amh.set_project(repo_dir, repo_dir.name)
+    c = amh.vector_db()
 
     sample_topics = [r[0] for r in c.execute("SELECT topic FROM topics ORDER BY RANDOM() LIMIT 50").fetchall()]
     queries = []
@@ -255,7 +255,7 @@ def benchmark_concurrent_writes(repo_dir: Path, num_workers=8, writes_per_worker
     print(f"      Completed {success_count}/{total_tasks} parallel writes in {total_time:.2f}s ({total_tasks/total_time:.1f} writes/s)")
     assert success_count == total_tasks, f"Some concurrent writes failed: {success_count}/{total_tasks}"
 
-    notes_count = len(list((repo_dir / ".amh" / "memory" / "decisions").glob("*.md")))
+    notes_count = len(list((amh.AMH_PROJECTS / repo_dir.name / "memory" / "decisions").glob("*.md")))
     print(f"      Persisted {notes_count} note files without data corruption.")
 
 def main():
@@ -264,6 +264,7 @@ def main():
     print("=" * 65)
     
     temp_dir = Path(tempfile.mkdtemp(prefix="amh_perf_"))
+    (temp_dir / ".git").mkdir()
     try:
         generate_synthetic_repo(temp_dir, num_files=60, functions_per_file=30)
         benchmark_indexing(temp_dir)
@@ -277,6 +278,8 @@ def main():
         print("=" * 65)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
+        subprocess.run([sys.executable, str(AMH_BIN), "forget", temp_dir.name], capture_output=True)
+        shutil.rmtree(amh.AMH_PROJECTS / temp_dir.name, ignore_errors=True)
 
 if __name__ == "__main__":
     main()

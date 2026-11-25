@@ -53,18 +53,31 @@ cd /path/to/your/project
 amh init
 ```
 
-Directory structure:
+**All data is stored globally in `~/.amh/` — never inside the project folder.**
+
 ```
-.amh/
-  system.md                 # System instructions injected to agents (editable)
-  rules/general.md          # Hard rules injected every turn
-  memory/experiences/       # Cross-session learnings (successes, failures, gotchas)
-  memory/decisions/         # Architectural decisions saved by agent
-  memory/bugs/              # Resolved bugs & gotchas
-  memory/conventions/       # Team conventions
-  docs/                     # High-level architecture docs
-  index.db                  # SQLite FTS5 search index (git-ignored, rebuildable)
+~/.amh/
+  projects/
+    <project_name>/
+      system.md                 # System instructions injected to agents (editable)
+      rules/general.md          # Hard rules injected every turn
+      memory/experiences/       # Cross-session learnings (successes, failures, gotchas)
+      memory/decisions/         # Architectural decisions saved by agent
+      memory/bugs/              # Resolved bugs & gotchas
+      memory/conventions/       # Team conventions
+      docs/                     # High-level architecture docs
+      vector.db                 # SQLite FTS5 search index (rebuildable anytime)
+      .last_session.json        # Previous session tracker for auto-learning
+  hash_map/
+    files.db                    # Maps every indexed file path + hash → project_name
+                                # Enables context recovery even when project folder is UNKNOWN
+  memory/
+    experiences/                # Global cross-project learnings
 ```
+
+> **Project name** is derived from the git remote URL name, or falls back to the folder name.
+> When working from an **unknown directory**, amh uses `hash_map/files.db` to find which
+> project the files belong to automatically.
 
 ---
 
@@ -74,13 +87,16 @@ Directory structure:
 | :--- | :--- |
 | `amh hook [prompt]` | Injects `<system>`, `<rules>`, `<past_experiences>`, and `<file_topics>` |
 | `amh learn "title" --insight "..."` | Records a task outcome and lesson for future sessions |
-| `amh search "query"` | BM25 search over code topics and past experiences |
+| `amh search "query"` | BM25 search over code topics and past experiences (current project) |
+| `amh search "query" --all-projects` | Search across **all** known projects via `hash_map/files.db` |
 | `amh read path:l0-l1` | Reads a line range without loading whole file |
-| `amh note "title" --folder decisions --text "..."` | Saves a markdown note to `.amh/memory/<folder>/` |
-| `amh rule coding --append --text "- always ..."` | Appends a rule to `.amh/rules/<name>.md` |
-| `amh write .amh/docs/api.md --text "..."` | Writes/appends documentation inside `.amh/` |
-| `amh status` | Displays indexed files, topics, experiences, and worker status |
+| `amh note "title" --folder decisions --text "..."` | Saves a note to `~/.amh/projects/<name>/memory/<folder>/` |
+| `amh rule coding --append --text "- always ..."` | Appends a rule to `~/.amh/projects/<name>/rules/<name>.md` |
+| `amh write .amh/docs/api.md --text "..."` | Writes/appends documentation |
+| `amh projects` | Lists all known projects tracked in `~/.amh/hash_map/files.db` |
+| `amh status` | Displays indexed files, topics, experiences, hash_map stats |
 | `amh index` | Synchronously scans and indexes modified files |
+| `amh init` | Initializes global `~/.amh/` store for this project |
 
 ---
 
